@@ -1,0 +1,2 @@
+defmodule SwayIpc do
+end
