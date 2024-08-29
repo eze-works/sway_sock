@@ -27,7 +27,7 @@ defmodule SwaySockTest do
     pid = self()
 
     # The listener
-    SwaySock.subscribe(get_connection(), :tick, fn event ->
+    SwaySock.subscribe(get_connection(), [:tick], fn {:tick, event} ->
       case event do
         # Sent when first subscribing to a tick event
         %{"first" => true} -> send(pid, :first)

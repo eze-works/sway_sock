@@ -6,7 +6,7 @@ defmodule SwaySock do
   This module provides the main API to interfacing with Sway via IPC
 
   ## Overview
-  
+
   `start_link/1` starts a Supervisor that connects to Sway's Unix Domain Socket. This implies the library is useless without a currently running sway instace.
 
   The architecture is simple. All commands apart from `subscribe/3` are translated to IPC messages and sent to the sway socket.
@@ -21,7 +21,7 @@ defmodule SwaySock do
   The same applies to Sway. This library opts to open a new connection to the sway socket for each event subscription. This is always done in supervised Task.
 
   ## Reply structure
-  
+
   The sway developers may change the format of replies across releases.
   Users of this library are encouraged to refer to the sway-ipc manual (`man sway-ipc`) for the schemas of the JSON sway sends back.
 
@@ -85,10 +85,10 @@ defmodule SwaySock do
   Multiple instances of this library may be used as long as they have different `name`s.
 
   ## How to supervise
-  
+
       iex> children = [ {SwaySock, :my_socket} ]
       ...> Supervisor.start_link(children, strategy: :one_for_one)
-  
+
   """
   def start_link(name) when is_atom(name) do
     Supervisor.start_link(__MODULE__, name, name: name)
@@ -112,7 +112,7 @@ defmodule SwaySock do
   end
 
   @doc """
-  Creates a new linked process that invokes `callback` whenever `event` occurs
+  Creates a new linked process that invokes `callback` when any of the listed `event_types` occurs
 
   You may subscribe to any of the following events
 
@@ -120,19 +120,27 @@ defmodule SwaySock do
 
   Events are described in the sway-ipc manual under the "EVENTS" section.
   """
-  def subscribe(conn, event, callback)
+  def subscribe(conn, event_types, callback)
       when is_atom(conn) and
-             is_atom(event) and
+             is_list(event_types) and
              is_function(callback, 1) do
-    if not Keyword.has_key?(get_event_types(), event) do
-      raise(ArgumentError, "invalid event type '#{event}'")
+    event_types = MapSet.new(event_types)
+    allowed = Keyword.keys(get_event_types()) |> MapSet.new()
+
+    unrecognized = MapSet.difference(event_types, allowed)
+
+    if MapSet.size(unrecognized) > 0 do
+      raise(
+        ArgumentError,
+        "The following event types were not recognized #{inspect(unrecognized)}"
+      )
     end
 
     pid = self()
     task_supervisor = get_task_supervisor_name(conn)
 
     Task.Supervisor.start_child(task_supervisor, fn ->
-      setup_subscription(pid, event, callback)
+      setup_subscription(pid, event_types, callback)
     end)
 
     receive do
@@ -141,13 +149,15 @@ defmodule SwaySock do
     end
   end
 
-  # Creates the new socket, subscribes it to `event`, and begin the subscriber loop
+  # Creates the new socket, subscribes it to `events`, and begins the subscriber loop
   # Reports the result of subscribing back to the parent process.
-  defp setup_subscription(parent_pid, event, callback) do
+  defp setup_subscription(parent_pid, event_types, callback) do
     socket = get_socket()
     type_id = get_message_types()[:subscribe]
 
-    send_message(socket, type_id, :json.encode([event]))
+    # Note: event_types is a MapSet, which is an Elixir struct.
+    # Make sure to convert it to a list before encoding as JSON
+    send_message(socket, type_id, :json.encode(event_types |> MapSet.to_list()))
 
     case recv_message(socket, type_id) do
       %{"success" => true} = result ->
@@ -158,14 +168,24 @@ defmodule SwaySock do
         exit(:normal)
     end
 
-    expected_type_id = Keyword.fetch!(get_event_types(), event)
-    subscriber_loop(socket, expected_type_id, callback)
+    # We have a map of event types/names -> type ids
+    # Construct a reverse map so can take a type id from an incoming event and quickly match that with a human-readable event name
+    type_id_lookup = Map.new(get_event_types(), fn {event, type_id} -> {type_id, event} end)
+    subscriber_loop(socket, type_id_lookup, event_types, callback)
   end
 
-  defp subscriber_loop(socket, type_id, callback) do
-    payload = recv_message(socket, type_id)
-    callback.(payload)
-    subscriber_loop(socket, type_id, callback)
+  defp subscriber_loop(socket, type_id_lookup, event_types, callback) do
+    {type_id, payload} = parse_message(socket)
+    {:ok, event_type} = Map.fetch(type_id_lookup, type_id)
+
+    if not(MapSet.member?(event_types, event_type)) do
+      raise(
+        "Received unexpected event '#{event_type}' in subscription for '#{inspect(event_types)}'"
+      )
+    end
+
+    callback.({event_type, :json.decode(payload)})
+    subscriber_loop(socket, type_id_lookup, event_types, callback)
   end
 
   @doc """

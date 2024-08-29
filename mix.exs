@@ -6,11 +6,11 @@ defmodule SwaySock.MixProject do
       app: :sway_sock,
       description: "Library for controlling SwayWM via IPC",
       source_url: "https://github.com/eze-works/sway_sock",
-      version: "0.1.0",
+      version: "0.2.0",
       elixir: "~> 1.17",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
-      package: package(),
+      package: package()
     ]
   end
 
