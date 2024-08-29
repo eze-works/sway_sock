@@ -3,6 +3,8 @@
 defmodule SwaySockTest do
   use ExUnit.Case, async: true
 
+  doctest(SwaySock)
+
   @connection :sway
 
   def get_connection(), do: @connection

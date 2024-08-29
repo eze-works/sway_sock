@@ -1,4 +1,32 @@
 defmodule SwaySock do
+  @moduledoc """
+  SwaySock is a library for controlling the running [Sway](https://swaywm.org/) process through its IPC interface.
+
+  You can query the state of the window manager, listen to events, and execute sway commands. 
+  This module provides the main API to interfacing with Sway via IPC
+
+  ## Overview
+  
+  `start_link/1` starts a Supervisor that connects to Sway's Unix Domain Socket. This implies the library is useless without a currently running sway instace.
+
+  The architecture is simple. All commands apart from `subscribe/3` are translated to IPC messages and sent to the sway socket.
+  The response is immediately read from the socket and returned as-is.
+
+  `subscribe/3` is a special case. The [`i3` docs](https://i3wm.org/docs/ipc.html#_events) explain it clearly:
+
+  > Caveat: As soon as you subscribe to an event, it is not guaranteed any longer that the requests to i3 are processed in order.
+  > This means, the following situation can happen: You send a GET_WORKSPACES request but you receive a "workspace" event before receiving the reply to GET_WORKSPACES.
+  > If your program does not want to cope which such kinds of race conditions (an event based library may not have a problem here), I suggest you create a separate connection to receive events.
+
+  The same applies to Sway. This library opts to open a new connection to the sway socket for each event subscription. This is always done in supervised Task.
+
+  ## Reply structure
+  
+  The sway developers may change the format of replies across releases.
+  Users of this library are encouraged to refer to the sway-ipc manual (`man sway-ipc`) for the schemas of the JSON sway sends back.
+
+  """
+
   use Supervisor
 
   @message_types [
@@ -52,26 +80,25 @@ defmodule SwaySock do
 
   @spec start_link(name :: atom()) :: {:ok, pid()}
   @doc """
-  Connects to the Sway socket.  `name` identifies the connection
+  Connects to the Sway socket. `name` identifies the connection
 
-  Returns a Supervisor used to monitor event subscriptions
+  Multiple instances of this library may be used as long as they have different `name`s.
+
+  ## How to supervise
+  
+      iex> children = [ {SwaySock, :my_socket} ]
+      ...> Supervisor.start_link(children, strategy: :one_for_one)
+  
   """
   def start_link(name) when is_atom(name) do
     Supervisor.start_link(__MODULE__, name, name: name)
   end
 
   @doc """
-  Closes all resources associated with the Sway connection
-  """
-  def stop(name) when is_atom(name) do
-    Supervisor.stop(name)
-  end
-
-  @doc """
   Runs the sway commands in `script` 
 
   Commands are generally separated by newlines. However, they can also be separated by commas (`,`) or semi-colons (`;`).
-  See the sway manual (`man 5 sway`) for more details
+  See the sway manual (`man 5 sway`) for more details.
   """
   def run_command(conn, script) when is_atom(conn) and is_binary(script) do
     send_and_receive(conn, :run_command, [script])
@@ -91,7 +118,7 @@ defmodule SwaySock do
 
   `#{@event_types |> Enum.map(fn {t, _} -> ":#{t}" end) |> Enum.join(", ")}`
 
-  Events are described in the sway manual under the "EVENTS" section.
+  Events are described in the sway-ipc manual under the "EVENTS" section.
   """
   def subscribe(conn, event, callback)
       when is_atom(conn) and
