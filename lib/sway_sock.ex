@@ -1,4 +1,7 @@
 defmodule SwaySock do
+
+  @type json :: :json.decode_value()
+
   @moduledoc """
   SwaySock is a library for controlling the running [Sway](https://swaywm.org/) process through its IPC interface.
 
@@ -94,6 +97,7 @@ defmodule SwaySock do
     Supervisor.start_link(__MODULE__, name, name: name)
   end
 
+  @spec run_command(atom(), binary()) :: :ok | :error
   @doc """
   Runs the sway commands in `script` 
 
@@ -112,6 +116,7 @@ defmodule SwaySock do
     end
   end
 
+  @spec get_workspaces(atom()) :: json()
   @doc """
   Retrieves the list of active workspaces
   """
@@ -131,13 +136,13 @@ defmodule SwaySock do
 
   ## Callback
 
-  The callback must accept arguments:
+  The callback must accept two arguments:
 
-  The first is the the event details.
-  It is a payload with two elements where the first element is an atom representing the event, and the second is its payload (e.g. {:window, %{ ... }})
+  - The first is the the event details, and has this structure:  `{:event_name, payload}`
+    It is a two-element tuple where the first element is an atom representing the event, and the second is its payload. 
 
-  The second argument is state for the callback. The return value of the callback will be used as the state for the next time the callback is invoked.
-  The callback starts with its state set to `callback_start_state`. 
+  - The second argument is state for the callback. The return value of one invocation of the callback is used as the state for the next.
+    The state is initialized to `callback_start_state`. 
 
   """
   def subscribe(conn, event_types, callback, callback_start_state \\ nil)
@@ -208,6 +213,7 @@ defmodule SwaySock do
     subscriber_loop(socket, type_id_lookup, event_types, callback, state)
   end
 
+  @spec get_outputs(atom()) :: json()
   @doc """
   Returns the list of outputs
   """
@@ -215,6 +221,7 @@ defmodule SwaySock do
     send_and_receive(conn, :get_outputs)
   end
 
+  @spec get_tree(atom()) :: json()
   @doc """
   Returns the JSON representation of sway's node tree
   """
@@ -222,6 +229,7 @@ defmodule SwaySock do
     send_and_receive(conn, :get_tree)
   end
 
+  @spec get_marks(atom()) :: json()
   @doc """
   Returns the currently set marks
   """
@@ -229,6 +237,7 @@ defmodule SwaySock do
     send_and_receive(conn, :get_marks)
   end
 
+  @spec get_bar_config(atom(), binary()) :: json()
   @doc """
   Returns the list of configured bar IDs.
 
@@ -238,6 +247,7 @@ defmodule SwaySock do
     send_and_receive(conn, :get_bar_config, bar_id)
   end
 
+  @spec get_version(atom()) :: json()
   @doc """
   Returns version information about the current sway process
   """
@@ -245,6 +255,7 @@ defmodule SwaySock do
     send_and_receive(conn, :get_version)
   end
 
+  @spec get_binding_modes(atom()) :: json()
   @doc """
   Returns a list of configured binding modes
   """
@@ -252,6 +263,7 @@ defmodule SwaySock do
     send_and_receive(conn, :get_binding_modes)
   end
 
+  @spec get_config(atom()) :: json()
   @doc """
   Returns the contents of the last-loaded sway configuration
   """
@@ -259,6 +271,7 @@ defmodule SwaySock do
     send_and_receive(conn, :get_config)
   end
 
+  @spec send_tick(atom(), binary()) :: :ok | :error
   @doc """
   Sends a TICK event to all clients subscribing to the event to ensure that all events prior to the tick were received.
 
@@ -273,6 +286,7 @@ defmodule SwaySock do
     end
   end
 
+  @spec get_binding_state(atom()) :: json()
   @doc """
   Returns the currently active binding mode.
   """
@@ -280,6 +294,7 @@ defmodule SwaySock do
     send_and_receive(conn, :get_binding_state)
   end
 
+  @spec get_inputs(atom()) :: json()
   @doc """
   Returns a list of the input devices currently available
   """
