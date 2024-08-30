@@ -20,6 +20,14 @@ defmodule SwaySockTest do
     assert Map.has_key?(hd(result), "id")
   end
 
+  test "subscribe to empty list" do
+    :ok = SwaySock.subscribe(get_connection(), [], fn _, _ ->
+        raise("Should not execute")
+      end)
+
+    Process.sleep(1000)
+  end
+
   test "subscribe" do
     # Send a tick event and verify it was received
     # Subscribing to tick event actually generates two events on the listener side
@@ -27,16 +35,18 @@ defmodule SwaySockTest do
     pid = self()
 
     # The listener
-    SwaySock.subscribe(get_connection(), [:tick], fn {:tick, event} ->
+    SwaySock.subscribe(get_connection(), [:tick], fn {:tick, event}, _state ->
       case event do
         # Sent when first subscribing to a tick event
         %{"first" => true} -> send(pid, :first)
         # Sent on subsequent tick events
         %{"first" => false, "payload" => "TOCK"} -> send(pid, :second)
       end
+
+      :ok
     end)
 
-    SwaySock.send_tick(get_connection(), "TOCK")
+    :ok = SwaySock.send_tick(get_connection(), "TOCK")
 
     receive do
       :first ->
@@ -65,7 +75,7 @@ defmodule SwaySockTest do
   test "get_marks" do
     # get a random mark name each test
     mark = for _ <- 1..10, into: "", do: <<Enum.random(?a..?z)>>
-    SwaySock.run_command(get_connection(), "mark #{mark}")
+    :ok = SwaySock.run_command(get_connection(), "mark #{mark}")
 
     marks = SwaySock.get_marks(get_connection())
     assert marks == [mark]

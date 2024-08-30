@@ -97,11 +97,19 @@ defmodule SwaySock do
   @doc """
   Runs the sway commands in `script` 
 
-  Commands are generally separated by newlines. However, they can also be separated by commas (`,`) or semi-colons (`;`).
-  See the sway manual (`man 5 sway`) for more details.
+  Returns `{:error, <errors>}` if any of the commands in `script` fail. The second element of the tuple will be the list of errors reported by sway.
+  Returns `:ok` otherwise.
   """
   def run_command(conn, script) when is_atom(conn) and is_binary(script) do
-    send_and_receive(conn, :run_command, [script])
+    results = send_and_receive(conn, :run_command, script)
+    succeeded = Enum.map(results, fn result -> result["success"] end) |> Enum.all?()
+    errors = Enum.map(results, fn result -> result["error"] || [] end) |> List.flatten()
+
+    if succeeded do
+      :ok
+    else
+      {:error, errors}
+    end
   end
 
   @doc """
@@ -112,18 +120,30 @@ defmodule SwaySock do
   end
 
   @doc """
-  Creates a new linked process that invokes `callback` when any of the listed `event_types` occurs
+  Creates a new linked process that invokes `callback` when any of the listed `event_types` occurs.
 
+  ## Events
   You may subscribe to any of the following events
 
   `#{@event_types |> Enum.map(fn {t, _} -> ":#{t}" end) |> Enum.join(", ")}`
 
   Events are described in the sway-ipc manual under the "EVENTS" section.
+
+  ## Callback
+
+  The callback must accept arguments:
+
+  The first is the the event details.
+  It is a payload with two elements where the first element is an atom representing the event, and the second is its payload (e.g. {:window, %{ ... }})
+
+  The second argument is state for the callback. The return value of the callback will be used as the state for the next time the callback is invoked.
+  The callback starts with its state set to `callback_start_state`. 
+
   """
-  def subscribe(conn, event_types, callback)
+  def subscribe(conn, event_types, callback, callback_start_state \\ nil)
       when is_atom(conn) and
              is_list(event_types) and
-             is_function(callback, 1) do
+             is_function(callback, 2) do
     event_types = MapSet.new(event_types)
     allowed = Keyword.keys(get_event_types()) |> MapSet.new()
 
@@ -140,18 +160,18 @@ defmodule SwaySock do
     task_supervisor = get_task_supervisor_name(conn)
 
     Task.Supervisor.start_child(task_supervisor, fn ->
-      setup_subscription(pid, event_types, callback)
+      setup_subscription(pid, event_types, callback, callback_start_state)
     end)
 
     receive do
-      %{"success" => _} = result -> result
-      response -> raise("Unexpected response from the sway daemon: #{inspect(response)}")
+      %{"success" => true} -> :ok
+      %{"success" => false} -> :error
     end
   end
 
   # Creates the new socket, subscribes it to `events`, and begins the subscriber loop
   # Reports the result of subscribing back to the parent process.
-  defp setup_subscription(parent_pid, event_types, callback) do
+  defp setup_subscription(parent_pid, event_types, callback, start_state) do
     socket = get_socket()
     type_id = get_message_types()[:subscribe]
 
@@ -171,21 +191,21 @@ defmodule SwaySock do
     # We have a map of event types/names -> type ids
     # Construct a reverse map so can take a type id from an incoming event and quickly match that with a human-readable event name
     type_id_lookup = Map.new(get_event_types(), fn {event, type_id} -> {type_id, event} end)
-    subscriber_loop(socket, type_id_lookup, event_types, callback)
+    subscriber_loop(socket, type_id_lookup, event_types, callback, start_state)
   end
 
-  defp subscriber_loop(socket, type_id_lookup, event_types, callback) do
+  defp subscriber_loop(socket, type_id_lookup, event_types, callback, state) do
     {type_id, payload} = parse_message(socket)
     {:ok, event_type} = Map.fetch(type_id_lookup, type_id)
 
-    if not(MapSet.member?(event_types, event_type)) do
+    if not MapSet.member?(event_types, event_type) do
       raise(
         "Received unexpected event '#{event_type}' in subscription for '#{inspect(event_types)}'"
       )
     end
 
-    callback.({event_type, :json.decode(payload)})
-    subscriber_loop(socket, type_id_lookup, event_types, callback)
+    state = callback.({event_type, :json.decode(payload)}, state)
+    subscriber_loop(socket, type_id_lookup, event_types, callback, state)
   end
 
   @doc """
@@ -215,7 +235,7 @@ defmodule SwaySock do
   When `bar_id` is non-empty, this function returns the configuration of the given bar instead. 
   """
   def get_bar_config(conn, bar_id \\ "") when is_atom(conn) and is_binary(bar_id) do
-    send_and_receive(conn, :get_bar_config, [bar_id])
+    send_and_receive(conn, :get_bar_config, bar_id)
   end
 
   @doc """
@@ -242,10 +262,15 @@ defmodule SwaySock do
   @doc """
   Sends a TICK event to all clients subscribing to the event to ensure that all events prior to the tick were received.
 
-  If a payload is given, it will be included in the TICK event
+  If a payload is given, it will be included in the TICK event.
+  Returns `:ok` if the message was successfully sent. Returns `:error` otherwise
+
   """
   def send_tick(conn, payload \\ "") when is_atom(conn) and is_binary(payload) do
-    send_and_receive(conn, :send_tick, [payload])
+    case send_and_receive(conn, :send_tick, payload) do
+      %{"success" => true} -> :ok
+      %{"success" => false} -> :error
+    end
   end
 
   @doc """
@@ -289,7 +314,9 @@ defmodule SwaySock do
   end
 
   # Sends a message to the sway IPC socket 
-  defp send_message(socket, type_id, payload) when is_port(socket) and is_list(payload) do
+  defp send_message(socket, type_id, payload)
+       when is_port(socket) and is_list(payload)
+       when is_port(socket) and is_binary(payload) do
     allowed = get_message_types() |> Enum.map(fn {_, t} -> t end)
 
     if type_id not in allowed do
