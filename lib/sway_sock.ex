@@ -1,5 +1,4 @@
 defmodule SwaySock do
-
   @type json :: :json.decode_value()
 
   @moduledoc """
@@ -27,6 +26,10 @@ defmodule SwaySock do
 
   The sway developers may change the format of replies across releases.
   Users of this library are encouraged to refer to the sway-ipc manual (`man sway-ipc`) for the schemas of the JSON sway sends back.
+
+  ## Examples
+
+  Check out the `examples/` directory. 
 
   """
 

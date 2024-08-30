@@ -21,7 +21,8 @@ defmodule SwaySockTest do
   end
 
   test "subscribe to empty list" do
-    :ok = SwaySock.subscribe(get_connection(), [], fn _, _ ->
+    :ok =
+      SwaySock.subscribe(get_connection(), [], fn _, _ ->
         raise("Should not execute")
       end)
 
